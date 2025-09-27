@@ -26,7 +26,7 @@ namespace backend.Services.ServiceDef
 
         public async ValueTask QueueBackgroundWorkItemAsync(OcrJob job)
         {
-            if (job != null)
+            if (job == null)
             {
                 throw new ArgumentNullException(nameof(job));
             }

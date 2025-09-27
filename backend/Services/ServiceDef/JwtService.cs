@@ -16,8 +16,16 @@ namespace backend.Services.ServiceDef
         }
         public string GenerateToken(User user, IList<string> roles)
         {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:key"]));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512);
+            var jwtKey = _config["Jwt_Key"]
+                         ?? throw new Exception("JWT Key is missing from configuration");
+            var jwtIssuer = _config["Jwt_Issuer"]
+                            ?? throw new Exception("JWT Issuer is missing from configuration");
+            var jwtAudience = _config["Jwt_Audience"]
+                              ?? throw new Exception("JWT Audience is missing from configuration");
+            var expireMinutes = int.TryParse(_config["Jwt_ExpireMinutes"], out var minutes) ? minutes : 60;
+
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
             var claims = new List<Claim>{
                 new Claim(JwtRegisteredClaimNames.Sub, user.Id),
@@ -30,11 +38,11 @@ namespace backend.Services.ServiceDef
             }
 
             var token = new JwtSecurityToken(
-                issuer: _config["Jwt:Issuer"],
-                audience: _config["Jwt:Audience"],
+                issuer: jwtIssuer,
+                audience: jwtAudience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(double.Parse(_config["Jwt:ExpireMinutes"])),
-                signingCredentials: creds
+                expires: DateTime.UtcNow.AddMinutes(expireMinutes),
+                signingCredentials: credentials
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);

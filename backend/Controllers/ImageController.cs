@@ -41,11 +41,9 @@ namespace backend.Controllers
             if (string.IsNullOrEmpty(userId))
             {
                 userId = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+                if (string.IsNullOrEmpty(userId)) return Unauthorized();
             }
-            else
-            {
-                return Unauthorized();
-            }
+
             try
             {
                 var (relPath, savedName) = await _imageService.SaveImageAsync(file);
@@ -89,7 +87,7 @@ namespace backend.Controllers
         public async Task<IActionResult> GetMyImages(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 10,
-            [FromQuery] string search = null,
+            [FromQuery] string? search = null,
             [FromQuery] string sort = "uploadedAt_desc",
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null
