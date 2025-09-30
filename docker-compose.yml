@@ -8,40 +8,40 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file: .env
     environment:
+      ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__DefaultConnection: ${ConnectionStrings__DefaultConnection}
-      Jwt_Key: ${Jwt_Key}
-      Jwt_Issuer: ${Jwt_Issuer}
-      Jwt_Audience: ${Jwt_Audience}
-      Jwt_ExpireMinutes: ${Jwt_ExpireMinutes}
+      Jwt__Key: ${Jwt_Key}
+      Jwt__Issuer: ${Jwt_Issuer}
+      Jwt__Audience: ${Jwt_Audience}
+      Jwt__ExpireMinutes: ${Jwt_ExpireMinutes}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
-      - postgres
-      
-  frontend:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5186:5186"
+
+  nginx:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    environment:
-      - VITE_BACKEND_URL=http://nginx/api
     depends_on:
       - backend
-
-  nginx:
-    image: nginx:alpine
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "80:80"
-    depends_on:
-      - frontend
-      - backend
 
 volumes:
   postgres_data:

@@ -21,25 +21,41 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <form onSubmit={handleLogin} className="bg-white p-6 rounded shadow-md w-full max-w-sm space-y-4">
-        <h1 className="text-xl font-bold">Login</h1>
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className="w-full border p-2 rounded"
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full border p-2 rounded"
-        />
-        <button type="submit" className="w-full bg-blue-500 text-white py-2 rounded">Login</button>
-      </form>
+    <div className="flex items-center justify-center min-h-screen bg-gray-100 px-4">
+      <div className="w-full max-w-md bg-white p-8 rounded-lg shadow-lg">
+        <h1 className="text-2xl font-bold text-center mb-6">Login</h1>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className="w-full border p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full border p-3 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <button
+            type="submit"
+            className="w-full bg-blue-600 text-white py-3 rounded font-semibold hover:bg-blue-700 transition"
+          >
+            Login
+          </button>
+        </form>
+
+        <div className="text-center mt-4">
+          <button
+            onClick={() => navigate("/register")}
+            className="w-full bg-green-600 text-white py-3 rounded font-semibold hover:bg-green-700 transition"
+          >
+            Create New Account
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

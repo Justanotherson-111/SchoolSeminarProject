@@ -122,7 +122,22 @@ using (var scope = app.Services.CreateScope())
         var newAdmin = new User { UserName = adminEmail, Email = adminEmail, FullName = "System Admin" };
         var result = await userMgr.CreateAsync(newAdmin, adminPass);
         if (result.Succeeded)
+        {
             await userMgr.AddToRoleAsync(newAdmin, "Admin");
+            Console.WriteLine($"✅ Admin user created: {adminEmail}");
+        }
+        else
+        {
+            Console.WriteLine("❌ Failed to create admin user:");
+            foreach (var error in result.Errors)
+            {
+                Console.WriteLine($"   - {error.Code}: {error.Description}");
+            }
+        }
+    }
+    else
+    {
+        Console.WriteLine($"ℹ️ Admin user already exists: {adminEmail}");
     }
 }
 

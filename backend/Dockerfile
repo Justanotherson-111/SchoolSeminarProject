@@ -1,17 +1,13 @@
-# Build
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
-WORKDIR /backend
-# Copy csproj and restore dependencies
-COPY *.csproj ./
-RUN dotnet restore
-# Copy the rest and build
-COPY . ./
-RUN dotnet publish -c Release -o /out
-# Runtime
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS runtime
-WORKDIR /backend
-COPY --from=build /out ./
-# Expose port
-EXPOSE 5000
-# Start app
-ENTRYPOINT [ "dotnet","backend.dll" ]
+WORKDIR /src
+COPY ["backend.csproj", "./"]
+RUN dotnet restore "backend.csproj"
+COPY . .
+RUN dotnet build "backend.csproj" -c Release -o /app/build
+RUN dotnet publish "backend.csproj" -c Release -o /app/publish
+
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+EXPOSE 5186
+CMD ["dotnet", "backend.dll"]

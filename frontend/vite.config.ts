@@ -1,13 +1,12 @@
+// vite.config.js
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 
-// https://vite.dev/config/
 export default defineConfig({
+  base: '/',              // relative paths
   plugins: [react()],
-  server: {
-    port: 5173,
-    proxy: {
-      "/api": "http://localhost:5186"
-    }
+  build: {
+    outDir: 'dist',        // explicitly define dist
+    emptyOutDir: true
   }
-});
+})

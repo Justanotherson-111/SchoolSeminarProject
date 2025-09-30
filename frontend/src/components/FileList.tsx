@@ -31,7 +31,7 @@ const FileList: React.FC = () => {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {files.map((f) => (
-        <FileCard key={f.id} id={f.id} name={f.name} downloadUrl={f.downloadUrl} />
+        <FileCard key={f.id} name={f.name} downloadUrl={f.downloadUrl} />
       ))}
     </div>
   );
