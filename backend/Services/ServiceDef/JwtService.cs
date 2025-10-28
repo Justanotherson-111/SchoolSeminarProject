@@ -10,19 +10,20 @@ namespace backend.Services.ServiceDef
     public class JwtService : IJwtService
     {
         private readonly IConfiguration _config;
-        private JwtService(IConfiguration config)
+        public JwtService(IConfiguration config)
         {
             _config = config;
         }
         public string GenerateToken(User user, IList<string> roles)
         {
-            var jwtKey = _config["Jwt_Key"]
-                         ?? throw new Exception("JWT Key is missing from configuration");
-            var jwtIssuer = _config["Jwt_Issuer"]
+            var jwtKey = _config["Jwt:Key"]
+             ?? throw new Exception("JWT Key is missing from configuration");
+            var jwtIssuer = _config["Jwt:Issuer"]
                             ?? throw new Exception("JWT Issuer is missing from configuration");
-            var jwtAudience = _config["Jwt_Audience"]
+            var jwtAudience = _config["Jwt:Audience"]
                               ?? throw new Exception("JWT Audience is missing from configuration");
-            var expireMinutes = int.TryParse(_config["Jwt_ExpireMinutes"], out var minutes) ? minutes : 60;
+            var expireMinutes = int.TryParse(_config["Jwt:ExpireMinutes"], out var minutes) ? minutes : 60;
+
 
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);

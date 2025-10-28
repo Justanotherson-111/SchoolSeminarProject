@@ -3,50 +3,49 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 
 const Register: React.FC = () => {
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const navigate = useNavigate();
+  const [form, setForm] = useState({ username: "", email: "", password: "" });
+  const [busy, setBusy] = useState(false);
+  const nav = useNavigate();
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [e.target.name]: e.target.value });
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setBusy(true);
     try {
-      await api.post("/auth/register", { username, email, password });
-      alert("Registration successful!");
-      navigate("/login");
+      await api.post("/auth/register", { UserName: form.username, Email: form.email, Password: form.password });
+      alert("Account created. Please login.");
+      nav("/login");
     } catch (err) {
       console.error(err);
-      alert("Registration failed");
+      alert("Registration failed.");
+    } finally {
+      setBusy(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <form onSubmit={handleRegister} className="bg-white p-6 rounded shadow-md w-full max-w-sm space-y-4">
-        <h1 className="text-xl font-bold">Register</h1>
-        <input
-          type="text"
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className="w-full border p-2 rounded"
-        />
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full border p-2 rounded"
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full border p-2 rounded"
-        />
-        <button type="submit" className="w-full bg-blue-500 text-white py-2 rounded">Register</button>
-      </form>
+    <div className="min-h-screen flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-black/60 border border-black/30 rounded-2xl p-8 backdrop-blur-md">
+        <h1 className="text-2xl font-bold text-emerald-300 mb-4 text-center">Create account</h1>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input name="username" placeholder="Username" onChange={handleChange}
+                 className="w-full p-3 rounded-md bg-gray-900 border border-gray-800 text-gray-100" required />
+          <input name="email" placeholder="Email" onChange={handleChange} type="email"
+                 className="w-full p-3 rounded-md bg-gray-900 border border-gray-800 text-gray-100" required />
+          <input name="password" placeholder="Password" onChange={handleChange} type="password"
+                 className="w-full p-3 rounded-md bg-gray-900 border border-gray-800 text-gray-100" required />
+          <button type="submit" disabled={busy}
+                  className="w-full py-2 rounded-md bg-emerald-500 hover:bg-emerald-400 text-black font-medium">
+            {busy ? "Creating..." : "Create account"}
+          </button>
+        </form>
+
+        <div className="mt-4 text-center text-sm text-gray-400">
+          <a className="text-emerald-300" href="/login">← Back to login</a>
+        </div>
+      </div>
     </div>
   );
 };

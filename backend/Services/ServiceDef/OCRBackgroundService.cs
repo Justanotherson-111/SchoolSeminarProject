@@ -1,78 +1,78 @@
 using backend.DataBase;
 using backend.Models;
 using backend.Services.Interfaces;
-using Microsoft.AspNetCore.Mvc.TagHelpers;
-using Microsoft.EntityFrameworkCore.Diagnostics.Internal;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Threading.Tasks.Dataflow;
+using Microsoft.EntityFrameworkCore;
 
-namespace backend.Services.ServiceDef
+public class OCRBackgroundService : BackgroundService
 {
-    public class OCRBackgroundService : BackgroundService
+    private readonly IBackgroundTaskQueue _queue;
+    private readonly ILogger<OCRBackgroundService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
+
+    public OCRBackgroundService(IBackgroundTaskQueue queue, ILogger<OCRBackgroundService> logger, IServiceScopeFactory scopeFactory)
     {
-        private readonly IBackgroundTaskQueue _queue;
-        private readonly ILogger<OCRBackgroundService> _logger;
-        private readonly IServiceScopeFactory _scopeFactory;
+        _queue = queue;
+        _logger = logger;
+        _scopeFactory = scopeFactory;
+    }
 
-        public OCRBackgroundService(IBackgroundTaskQueue backgroundTaskQueue, ILogger<OCRBackgroundService> logger, IServiceScopeFactory serviceScopeFactory)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("OCR background service starting.");
+
+        while (!stoppingToken.IsCancellationRequested)
         {
-            _queue = backgroundTaskQueue;
-            _logger = logger;
-            _scopeFactory = serviceScopeFactory;
-        }
-        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-        {
-            _logger.LogInformation("OCR background service starting.");
-            while (!stoppingToken.IsCancellationRequested)
+            OcrJob job = null;
+            try
             {
-                OcrJob ocrJob = null;
-                try
-                {
-                    ocrJob = await _queue.DequeueAsync(stoppingToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                if (ocrJob == null)
-                {
-                    continue;
-                }
-                try
-                {
-                    using var scope = _scopeFactory.CreateScope();
-                    var ocr = scope.ServiceProvider.GetRequiredService<IOcrService>();
-                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                    var logger = scope.ServiceProvider.GetRequiredService<ILogger<OCRBackgroundService>>();
+                job = await _queue.DequeueAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) { break; }
 
-                    logger.LogInformation("Processing OCR for ImageId {ImageId}", ocrJob.ImageRecordId);
+            if (job == null) continue;
 
-                    var text = await ocr.ExtractTextAsync(ocrJob.FullPath, ocrJob.Language);
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var ocr = scope.ServiceProvider.GetRequiredService<IOcrService>();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var logger = scope.ServiceProvider.GetRequiredService<ILogger<OCRBackgroundService>>();
 
-                    if (!string.IsNullOrEmpty(text))
+                logger.LogInformation("Processing OCR for ImageId {ImageId}", job.ImageRecordId);
+
+                var text = await ocr.ExtractTextAsync(job.FullPath, job.Language);
+                if (!string.IsNullOrEmpty(text))
+                {
+                    var txtFolder = Path.Combine(Directory.GetCurrentDirectory(), "ExtractedTexts");
+                    if (!Directory.Exists(txtFolder)) Directory.CreateDirectory(txtFolder);
+
+                    var txtFileName = $"{Guid.NewGuid()}.txt";
+                    var txtPath = Path.Combine(txtFolder, txtFileName);
+
+                    await File.WriteAllTextAsync(txtPath, text);
+
+                    var extracted = new ExtractedText
                     {
-                        var extracted = new Models.ExtractedText
-                        {
-                            ImageRecordId = ocrJob.ImageRecordId,
-                            Text = text,
-                            Language = ocrJob.Language
-                        };
-                        db.ExtractedTexts.Add(extracted);
-                        await db.SaveChangesAsync();
-                        logger.LogInformation("OCR completed and saved for {ImageId}", ocrJob.ImageRecordId);
-                    }
-                    else
-                    {
-                        logger.LogWarning("OCR returned empty text for {ImageId}", ocrJob.ImageRecordId);
-                    }
+                        ImageRecordId = job.ImageRecordId,
+                        Language = job.Language,
+                        TxtFilePath = txtPath
+                    };
+                    db.ExtractedTexts.Add(extracted);
+                    await db.SaveChangesAsync();
+
+                    logger.LogInformation("OCR completed and saved to {TxtPath}", txtPath);
                 }
-                catch (Exception e)
+                else
                 {
-                    _logger.LogError(e, "Error passing OCR job {@job}", ocrJob);
+                    logger.LogWarning("OCR returned empty text for {ImageId}", job.ImageRecordId);
                 }
             }
-            _logger.LogInformation("OCR background service stopping.");
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Error processing OCR job {@Job}", job);
+            }
         }
+
+        _logger.LogInformation("OCR background service stopping.");
     }
 }

@@ -1,7 +1,6 @@
 services:
   postgres:
     image: postgres:16
-    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -10,31 +9,29 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - app_net
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    env_file: .env
+    env_file: ./backend/.env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ConnectionStrings__DefaultConnection: ${ConnectionStrings__DefaultConnection}
-      Jwt__Key: ${Jwt_Key}
-      Jwt__Issuer: ${Jwt_Issuer}
-      Jwt__Audience: ${Jwt_Audience}
-      Jwt__ExpireMinutes: ${Jwt_ExpireMinutes}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "5186:5186"
+    restart: on-failure
+    expose:
+      - "8080"
+    networks:
+      - app_net
 
-  nginx:
+  frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -42,6 +39,12 @@ services:
       - backend
     ports:
       - "80:80"
+    networks:
+      - app_net
 
 volumes:
   postgres_data:
+
+networks:
+  app_net:
+    driver: bridge

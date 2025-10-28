@@ -1,0 +1,10 @@
+FROM mcr.microsoft.com/dotnet/sdk:9.0
+
+WORKDIR /app
+
+# Copy project files
+COPY . .
+
+# Install dotnet-ef globally
+RUN dotnet tool install --global dotnet-ef --version 9.0.0 \
+    && export PATH="$PATH:/root/.dotnet/tools"

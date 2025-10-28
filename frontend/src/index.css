@@ -1,71 +1,78 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+/* --- Animated background - drop into src/index.css --- */
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+/* container behind everything */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0; /* behind everything */
+  pointer-events: none;
+  overflow: hidden;
+  background: radial-gradient(1200px 600px at 10% 10%, rgba(18, 24, 45, 0.6) 0%, transparent 30%),
+              radial-gradient(1000px 500px at 90% 80%, rgba(12, 30, 60, 0.6) 0%, transparent 30%),
+              linear-gradient(180deg, rgba(6,10,15,1) 0%, rgba(10,14,20,1) 100%);
 }
 
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+/* blurred floating shapes */
+.app-bg__blob {
+  position: absolute;
+  filter: blur(60px) saturate(1.2);
+  opacity: 0.55;
+  will-change: transform, opacity;
+  mix-blend-mode: screen;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* shape sizes & base colors */
+.app-bg__blob--a {
+  width: 640px;
+  height: 420px;
+  left: -10%;
+  top: -10%;
+  background: radial-gradient(circle at 30% 30%, rgba(96,165,250,0.18), transparent 40%),
+              linear-gradient(120deg, rgba(79,70,229,0.12), rgba(59,130,246,0.12));
+  transform: translate3d(0,0,0);
+  border-radius: 36%;
+}
+.app-bg__blob--b {
+  width: 520px;
+  height: 360px;
+  right: -12%;
+  bottom: -8%;
+  background: radial-gradient(circle at 70% 30%, rgba(16,185,129,0.12), transparent 40%),
+              linear-gradient(120deg, rgba(20,184,166,0.10), rgba(96,165,250,0.06));
+  border-radius: 40%;
+}
+.app-bg__blob--c {
+  width: 420px;
+  height: 300px;
+  left: 50%;
+  top: 30%;
+  background: radial-gradient(circle at 40% 40%, rgba(236,72,153,0.08), transparent 40%),
+              linear-gradient(120deg, rgba(236,72,153,0.06), rgba(99,102,241,0.04));
+  border-radius: 45%;
 }
 
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
+/* subtle float animations */
+@keyframes floatA {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: .6; }
+  50% { transform: translate3d(10px, 12px, 0) rotate(2deg) scale(1.02); opacity: .75; }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: .6; }
 }
-button:hover {
-  border-color: #646cff;
+@keyframes floatB {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: .54; }
+  50% { transform: translate3d(-14px, -8px, 0) rotate(-1deg) scale(1.03); opacity: .7; }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: .54; }
 }
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+@keyframes floatC {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: .45; }
+  50% { transform: translate3d(6px, -16px, 0) rotate(1.5deg) scale(1.01); opacity: .6; }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg) scale(1); opacity: .45; }
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+.app-bg__blob--a { animation: floatA 14s ease-in-out infinite; }
+.app-bg__blob--b { animation: floatB 18s ease-in-out infinite; }
+.app-bg__blob--c { animation: floatC 16s ease-in-out infinite; }
+
+/* Reduce motion preference: stop animations */
+@media (prefers-reduced-motion: reduce) {
+  .app-bg__blob { animation: none !important; transition: none !important; }
 }
-@tailwind base;
-@tailwind components;
-@tailwind utilities;

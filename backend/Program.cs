@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddEnvironmentVariables();
 var config = builder.Configuration;
 
 // 🔹 Database
@@ -34,7 +35,6 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer("JwtBearer", options =>
 {
-    var config = builder.Configuration;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
@@ -141,16 +141,23 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// 🔹 Middleware
+// -------------------- Middleware setup --------------------
 if (app.Environment.IsDevelopment())
 {
+    // ✅ Enable Swagger only in Development
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
+
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
+
+// Optional: simple health endpoint for debugging
+app.MapGet("/api/health", () => Results.Ok("Healthy"));
+
 app.Run();

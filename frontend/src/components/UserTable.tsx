@@ -1,51 +1,61 @@
 import React, { useEffect, useState } from "react";
 import api from "../api/axios";
 
-interface User {
-  id: string;
-  username: string;
-  email: string;
-  role: string;
-}
+interface User { id: string; userName?: string; email?: string; fullName?: string; }
 
 const UserTable: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    (async () => {
       try {
-        const res = await api.get("/admin/users"); // only backend knows this endpoint
-        setUsers(res.data);
+        const res = await api.get("/admin/users");
+        setUsers(res.data ?? []);
       } catch (err) {
         console.error(err);
+        alert("Failed to load users or unauthorized");
       } finally {
         setLoading(false);
       }
-    };
-    fetchUsers();
+    })();
   }, []);
 
-  if (loading) return <div>Loading...</div>;
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete user?")) return;
+    try {
+      await api.delete(`/admin/users/${id}`);
+      setUsers(prev => prev.filter(u => u.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert("Delete failed");
+    }
+  };
+
+  if (loading) return <div className="p-4 text-gray-400">Loading users...</div>;
 
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full border border-gray-200">
-        <thead className="bg-gray-100">
+      <table className="w-full text-left border-collapse">
+        <thead className="text-xs text-gray-400">
           <tr>
-            <th className="p-2 text-left">ID</th>
-            <th className="p-2 text-left">Username</th>
-            <th className="p-2 text-left">Email</th>
-            <th className="p-2 text-left">Role</th>
+            <th className="p-2">ID</th>
+            <th className="p-2">Username</th>
+            <th className="p-2">Email</th>
+            <th className="p-2">Full name</th>
+            <th className="p-2">Actions</th>
           </tr>
         </thead>
         <tbody>
-          {users.map((u) => (
-            <tr key={u.id} className="border-t">
-              <td className="p-2">{u.id}</td>
-              <td className="p-2">{u.username}</td>
-              <td className="p-2">{u.email}</td>
-              <td className="p-2">{u.role}</td>
+          {users.map(u => (
+            <tr key={u.id} className="border-y border-black/20">
+              <td className="p-2 text-sm text-gray-200">{u.id}</td>
+              <td className="p-2 text-sm text-gray-200">{u.userName}</td>
+              <td className="p-2 text-sm text-gray-200">{u.email}</td>
+              <td className="p-2 text-sm text-gray-200">{u.fullName}</td>
+              <td className="p-2">
+                <button onClick={() => handleDelete(u.id)} className="px-2 py-1 rounded bg-red-600 text-white">Delete</button>
+              </td>
             </tr>
           ))}
         </tbody>
