@@ -1,25 +1,30 @@
+// frontend/src/utils/useToast.ts
 import { useState } from "react";
 
-export type ToastType = "info" | "success" | "error";
+export type ToastType = "success" | "error" | "info";
 
 export interface Toast {
   id: string;
   message: string;
-  type?: ToastType;
+  type: ToastType;
 }
 
-export default function useToast() {
+const TOAST_DURATION = 3000;
+
+const useToast = () => {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const add = (message: string, type: ToastType = "info") => {
-    const id = Date.now().toString();
+  const showToast = (message: string, type: ToastType = "info") => {
+    const id = crypto.randomUUID();
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => remove(id), 4000);
+    setTimeout(() => removeToast(id), TOAST_DURATION);
   };
 
-  const remove = (id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  return { toasts, add, remove };
-}
+  return { toasts, showToast, remove: removeToast };
+};
+
+export default useToast;

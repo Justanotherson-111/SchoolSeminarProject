@@ -1,8 +1,11 @@
+using backend.Models;
+
 namespace backend.Services.Interfaces
 {
     public interface IImageService
     {
-        Task<(string RelativePath, string FileName)> SaveImageAsync(IFormFile formFile);
-        Task DeleteImageAsync(string RelativePath);
+        Task<Image> UploadImageAsync(Stream fileStream, string originalFileName, User user);
+        Task<IEnumerable<Image>> GetImagesAsync(User user);
+        Task<bool> DeleteImageAsync(Guid imageId, User user);
     }
 }

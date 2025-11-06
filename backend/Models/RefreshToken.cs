@@ -5,27 +5,21 @@ namespace backend.Models
     public class RefreshToken
     {
         [Key]
-        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public Guid Id { get; set; } = Guid.NewGuid();
 
         [Required]
         public string Token { get; set; } = string.Empty;
 
         [Required]
-        public string UserId { get; set; } = string.Empty;
-
-        public User User { get; set; } = null!;
-
         public DateTime Expires { get; set; }
-        public DateTime Created { get; set; } = DateTime.UtcNow;
 
-        // When token was revoked (if any)
-        public DateTime? Revoked { get; set; }
+        [Required]
+        public bool Revoked { get; set; } = false;
 
-        // Optional: helps rotation logic
-        public string? ReplacedByToken { get; set; }
+        // Foreign key & navigation
+        [Required]
+        public Guid UserId { get; set; }
 
-        // Helper property
-        public bool IsExpired => DateTime.UtcNow >= Expires;
-        public bool IsActive => Revoked == null && !IsExpired;
+        public User? User { get; set; }
     }
 }

@@ -1,9 +1,9 @@
 using backend.DataBase;
+using backend.DTOs;
 using backend.Models;
-using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace backend.Controllers
 {
@@ -12,43 +12,70 @@ namespace backend.Controllers
     [Authorize(Roles = "Admin")]
     public class AdminController : ControllerBase
     {
-        private readonly UserManager<User> _userManager;
         private readonly AppDbContext _db;
-        private readonly IImageService _imageService;
-        public AdminController(UserManager<User> userManager, AppDbContext appDbContext, IImageService imageService)
-        {
-            _userManager = userManager;
-            _db = appDbContext;
-            _imageService = imageService;
-        }
+        public AdminController(AppDbContext db) => _db = db;
 
         [HttpGet("users")]
-        public IActionResult GetUsers()
+        public async Task<IActionResult> GetUsers()
         {
-            var users = _userManager.Users.Select(u => new { u.Id, u.UserName, u.Email, u.FullName }).ToList();
-            return Ok(users);
+            var users = await _db.Users
+                .Include(u => u.Images)
+                    .ThenInclude(i => i.TextFiles)
+                .ToListAsync();
+
+            var dto = users.Select(u => new AdminUserDTO
+            {
+                Id = u.Id,
+                UserName = u.UserName,
+                Email = u.Email,
+                Role = u.Role,
+                Images = u.Images.Select(i => new AdminImageDTO
+                {
+                    Id = i.Id,
+                    OriginalFileName = i.OriginalFileName,
+                    FileName = i.FileName,
+                    Size = i.Size,
+                    CreatedAt = i.CreatedAt,
+                    TextFiles = i.TextFiles.Select(t => new AdminTextFileDTO
+                    {
+                        Id = t.Id,
+                        Language = t.Language,
+                        FileName = Path.GetFileName(t.TxtFilePath), // safe: only file name
+                        CreatedAt = t.CreatedAt
+                    }).ToList()
+                }).ToList()
+            });
+
+            return Ok(dto);
         }
-        [HttpDelete("users/{id}")]
-        public async Task<IActionResult> DeleteUser(string id)
+
+        [HttpDelete("user/{id:guid}")]
+        public async Task<IActionResult> DeleteUser(Guid id)
         {
-            var user = await _userManager.FindByIdAsync(id);
-            if (user == null)
+            var user = await _db.Users
+                .Include(u => u.Images)
+                    .ThenInclude(i => i.TextFiles)
+                .Include(u => u.RefreshTokens)
+                .FirstOrDefaultAsync(u => u.Id == id);
+
+            if (user == null) return NotFound();
+
+            // Log image & text file deletion
+            foreach (var image in user.Images)
             {
-                return NotFound();
+                Console.WriteLine($"Deleting Image: {image.OriginalFileName} (Stored: {image.FileName}, Size: {image.Size} bytes)");
+
+                foreach (var txt in image.TextFiles)
+                {
+                    Console.WriteLine($"   Deleting TextFile: {Path.GetFileName(txt.TxtFilePath)}, Language: {txt.Language}");
+                }
             }
 
-            var images = _db.ImageRecords.Where(i => i.OwnerId == id).ToList();
-            foreach (var img in images)
-            {
-                await _imageService.DeleteImageAsync(img.RelativePath);
-            }
+            // Delete user (will cascade images, text files, and refresh tokens)
+            _db.Users.Remove(user);
+            await _db.SaveChangesAsync();
 
-            var res = await _userManager.DeleteAsync(user);
-            if (!res.Succeeded)
-            {
-                return BadRequest(res.Errors);
-            }
-            return Ok(new { message = "deleted" });
+            return NoContent();
         }
     }
 }

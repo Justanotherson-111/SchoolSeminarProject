@@ -1,85 +1,102 @@
+using backend.DataBase;
+using backend.DTOs;
+using backend.Models;
 using backend.Services.Interfaces;
-using Microsoft.AspNetCore.Routing.Constraints;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace backend.Services.ServiceDef
 {
     public class ImageService : IImageService
     {
-        private readonly string _uploadRoot;
-        private readonly IVirusScanner _scanner;
-        private readonly long _maxBytes;
-        private static readonly HashSet<string> AllowedMimes = new()
+        private readonly AppDbContext _db;
+        private readonly IBackgroundTaskQueue _queue;
+        private readonly IWebHostEnvironment _env;
+        private readonly UploadSettings _uploadSettings;
+
+        public ImageService(
+            AppDbContext db,
+            IBackgroundTaskQueue queue,
+            IWebHostEnvironment env,
+            IOptions<UploadSettings> uploadSettings)
         {
-            "image/jpeg",
-            "image/png",
-            "image/bmp",
-            "image/tiff",
-            "image/webp"
-        };
-        private static readonly HashSet<string> AllowedExt = new()
-        {
-            ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"
-        };
-        public ImageService(IConfiguration config, IVirusScanner scanner)
-        {
-            var folder = config["UploadSettings:ImageFolder"] ?? "Uploads";
-            _uploadRoot = Path.IsPathRooted(folder) ? folder : Path.Combine(Directory.GetCurrentDirectory(), folder);
-            if (!Directory.Exists(_uploadRoot)) Directory.CreateDirectory(_uploadRoot);
-            _scanner = scanner;
-            _maxBytes = long.TryParse(config["UploadSettings:MaxFileBytes"], out var m) ? m : 50_000_000L;
-        }
-        public Task DeleteImageAsync(string relativePath)
-        {
-            var full = Path.IsPathRooted(relativePath) ? relativePath : Path.Combine(Directory.GetCurrentDirectory(), relativePath);
-            if (File.Exists(full))
-            {
-                File.Delete(full);
-            }
-            return Task.CompletedTask;
+            _db = db;
+            _queue = queue;
+            _env = env;
+            _uploadSettings = uploadSettings.Value;
+
+            // Ensure base folders exist
+            Directory.CreateDirectory(Path.Combine(_env.ContentRootPath, _uploadSettings.ImageFolder));
+            Directory.CreateDirectory(Path.Combine(_env.ContentRootPath, _uploadSettings.TextFolder));
         }
 
-        public async Task<(string RelativePath, string FileName)> SaveImageAsync(IFormFile formFile)
+        public async Task<Image> UploadImageAsync(Stream fileStream, string originalFileName, User user)
         {
-            if (formFile.Length <= 0)
-            {
-                throw new ArgumentException("Empty file");
-            }
-            if (formFile.Length > _maxBytes)
-            {
-                throw new ArgumentException("File too large");
-            }
-            if (!AllowedMimes.Contains(formFile.ContentType))
-            {
-                throw new ArgumentException("Unsupported content type");
-            }
-            var ext = Path.GetExtension(formFile.FileName);
-            if (!AllowedExt.Contains(ext))
-            {
-                throw new ArgumentException("Unsupported file extension");
-            }
-            var fileName = $"{Guid.NewGuid()}{ext}";
-            var rel = Path.Combine("Uploads", fileName);
-            var full = Path.Combine(_uploadRoot, rel);
+            // Create user-specific upload folder
+            var userDir = Path.Combine(_env.ContentRootPath, _uploadSettings.ImageFolder, user.UserName);
+            Directory.CreateDirectory(userDir);
 
-            using var stream = new FileStream(full, FileMode.Create);
-            await formFile.CopyToAsync(stream);
+            var storedFileName = $"{Guid.NewGuid()}{Path.GetExtension(originalFileName)}";
+            var fullPath = Path.Combine(userDir, storedFileName);
 
-            var clean = await _scanner.ScanAsync(full);
-            if (!clean)
+            await using (var fs = new FileStream(fullPath, FileMode.Create))
             {
-                try
-                {
-                    if (File.Exists(full))
-                    {
-                        File.Delete(full);
-                    }
-                }
-                catch {/* ignore */}
-                {
-                    throw new InvalidOperationException("File failed virus scan");
-                }
+                await fileStream.CopyToAsync(fs);
             }
-            return (rel, fileName);
+
+            var image = new Image
+            {
+                UserId = user.Id,
+                OriginalFileName = originalFileName,
+                FileName = storedFileName,
+                RelativePath = Path.Combine(user.UserName, storedFileName), // store relative to Uploads/<username>
+                Size = fileStream.Length
+            };
+
+            _db.Images.Add(image);
+            await _db.SaveChangesAsync();
+
+            // Enqueue OCR job
+            var job = new OcrJob { ImageId = image.Id };
+            _db.OcrJobs.Add(job);
+            await _db.SaveChangesAsync();
+            _queue.EnqueueOcrJob(job);
+
+            return image;
+        }
+
+        public async Task<IEnumerable<Image>> GetImagesAsync(User user)
+        {
+            return await _db.Images
+                .Include(i => i.TextFiles)
+                .Where(i => i.UserId == user.Id)
+                .ToListAsync();
+        }
+
+        public async Task<bool> DeleteImageAsync(Guid imageId, User user)
+        {
+            var image = await _db.Images
+                .Include(i => i.TextFiles)
+                .FirstOrDefaultAsync(i => i.Id == imageId && i.UserId == user.Id);
+
+            if (image == null) return false;
+
+            // Delete image file
+            var fullImagePath = Path.Combine(_env.ContentRootPath, _uploadSettings.ImageFolder, image.RelativePath);
+            if (File.Exists(fullImagePath)) File.Delete(fullImagePath);
+
+            // Delete related text files
+            foreach (var txt in image.TextFiles ?? new List<TextFile>())
+            {
+                var txtPath = Path.Combine(_env.ContentRootPath, _uploadSettings.TextFolder, txt.TxtFilePath);
+                if (File.Exists(txtPath)) File.Delete(txtPath);
+            }
+
+            _db.TextFiles.RemoveRange(image.TextFiles ?? new List<TextFile>());
+            _db.Images.Remove(image);
+            await _db.SaveChangesAsync();
+
+            return true;
         }
     }
 }

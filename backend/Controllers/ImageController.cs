@@ -1,80 +1,84 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using backend.DataBase;
 using backend.Models;
 using backend.Services.Interfaces;
-using backend.DataBase;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
-using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 
 namespace backend.Controllers
 {
-    [EnableRateLimiting("UserPolicy")]
     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
     public class ImageController : ControllerBase
     {
+        private readonly IImageService _images;
         private readonly AppDbContext _db;
-        private readonly IImageService _imageService;
-        private readonly IBackgroundTaskQueue _taskQueue;
-        private readonly UserManager<User> _userManager;
-        private readonly ILogger<ImageController> _logger;
 
-        public ImageController(AppDbContext db, IImageService imageService, UserManager<User> userManager,
-            IBackgroundTaskQueue taskQueue, ILogger<ImageController> logger)
+        private static readonly Dictionary<Guid, DateTime> _lastRequest = new();
+        private static readonly TimeSpan _limit = TimeSpan.FromSeconds(3);
+
+        public ImageController(IImageService images, AppDbContext db)
         {
+            _images = images;
             _db = db;
-            _imageService = imageService;
-            _userManager = userManager;
-            _taskQueue = taskQueue;
-            _logger = logger;
+        }
+
+        private async Task<User?> GetCurrentUserAsync()
+        {
+            var userIdClaim = User.Claims.FirstOrDefault(c =>
+                c.Type == JwtRegisteredClaimNames.Sub ||
+                c.Type == ClaimTypes.NameIdentifier ||
+                c.Type == "nameid")?.Value;
+
+            if (!Guid.TryParse(userIdClaim, out var userGuid)) return null;
+            return await _db.Users.FirstOrDefaultAsync(u => u.Id == userGuid);
+
+        }
+
+        private bool CheckRateLimit(User user)
+        {
+            if (_lastRequest.TryGetValue(user.Id, out var last))
+            {
+                if ((DateTime.UtcNow - last) < _limit) return false;
+            }
+            _lastRequest[user.Id] = DateTime.UtcNow;
+            return true;
         }
 
         [HttpPost("upload")]
-        [RequestSizeLimit(70_000_000)]
-        public async Task<IActionResult> Upload(IFormFile file)
+        public async Task<IActionResult> Upload([FromForm] IFormFile file)
         {
-            if (file == null || file.Length == 0) return BadRequest("No file detected");
+            var user = await GetCurrentUserAsync();
+            if (user == null) return Unauthorized("User not found");
+            if (!CheckRateLimit(user)) return StatusCode(429, "Rate limit exceeded");
+            if (file == null || file.Length == 0) return BadRequest("No file uploaded");
 
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                         ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
-
-            if (string.IsNullOrEmpty(userId)) return Unauthorized();
-
-            try
-            {
-                var (relPath, savedName) = await _imageService.SaveImageAsync(file);
-
-                var imageRecord = new ImageRecord
-                {
-                    FileName = savedName,
-                    OriginalFileName = file.FileName,
-                    ContentType = file.ContentType,
-                    size = file.Length,
-                    RelativePath = relPath,
-                    OwnerId = userId
-                };
-                _db.ImageRecords.Add(imageRecord);
-                await _db.SaveChangesAsync();
-
-                var fullPath = Path.Combine(Directory.GetCurrentDirectory(), relPath);
-                await _taskQueue.QueueBackgroundWorkItemAsync(new OcrJob(imageRecord.Id, fullPath, "eng"));
-
-                return Ok(new
-                {
-                    imageId = imageRecord.Id,
-                    path = relPath
-                });
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Upload failed");
-                return StatusCode(500, "Upload failed");
-            }
+            var image = await _images.UploadImageAsync(file.OpenReadStream(), file.FileName, user);
+            return Ok(image);
         }
 
-        // Keep GET / DELETE / DOWNLOAD logic for images only
-    }
+        [HttpGet]
+        public async Task<IActionResult> GetImages()
+        {
+            var user = await GetCurrentUserAsync();
+            if (user == null) return Unauthorized("User not found");
 
+            var images = await _images.GetImagesAsync(user);
+            return Ok(images);
+        }
+
+        [HttpDelete("{id:guid}")]
+        public async Task<IActionResult> Delete(Guid id)
+        {
+            var user = await GetCurrentUserAsync();
+            if (user == null) return Unauthorized("User not found");
+
+            var success = await _images.DeleteImageAsync(id, user);
+            if (!success) return NotFound();
+            return NoContent();
+        }
+    }
 }

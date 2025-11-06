@@ -20,18 +20,19 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       {/* Toast Notifications */}
-      <ToastContainer toasts={toast.toasts} onRemove={toast.remove} />
+      {toast.toasts.length > 0 && (
+        <ToastContainer toasts={toast.toasts} onRemove={toast.remove} />
+      )}
 
-      {/* Main Routes */}
       <Routes>
-        {/* Redirect root to dashboard */}
+        {/* Root redirect */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-        {/* Public Routes */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        {/* Public pages */}
+        <Route path="/login" element={<Login showToast={toast.showToast} />} />
+        <Route path="/register" element={<Register showToast={toast.showToast} />} />
 
-        {/* Protected Routes */}
+        {/* Protected pages */}
         <Route
           path="/dashboard"
           element={
@@ -66,22 +67,23 @@ const App: React.FC = () => {
         />
 
         <Route
-          path="/admin"
-          element={
-            <ProtectedRoute roles={["Admin"]}>
-              <Layout>
-                <AdminPanel />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
           path="/profile"
           element={
             <ProtectedRoute>
               <Layout>
                 <Profile />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Admin-only page */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute requiredRole="Admin">
+              <Layout>
+                <AdminPanel />
               </Layout>
             </ProtectedRoute>
           }

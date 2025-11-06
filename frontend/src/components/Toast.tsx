@@ -1,16 +1,36 @@
-type Toast = { id: string; message: string; type?: "info" | "success" | "error" };
+import React from "react";
+import type { Toast as ToastType } from "../utils/useToast";
 
-export default function ToastContainer({ toasts, onRemove }: { toasts: Toast[]; onRemove: (id: string) => void; }) {
+interface Props {
+  toasts: ToastType[];
+  onRemove: (id: string) => void;
+}
+
+const ToastContainer: React.FC<Props> = ({ toasts, onRemove }) => {
   return (
-    <div className="fixed right-4 top-20 z-50 flex flex-col gap-3">
-      {toasts.map(t => (
-        <div key={t.id} className={`px-4 py-2 rounded-md shadow-md max-w-xs text-sm ${t.type === "error" ? "bg-red-600 text-white" : t.type === "success" ? "bg-emerald-600 text-black" : "bg-gray-800 text-white"}`}>
-          <div className="flex justify-between items-center gap-3">
-            <div>{t.message}</div>
-            <button onClick={() => onRemove(t.id)} className="opacity-80 hover:opacity-100">✕</button>
-          </div>
+    <div className="fixed top-5 right-5 flex flex-col gap-3 z-50">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={`px-4 py-2 rounded shadow-lg text-white ${
+            t.type === "success"
+              ? "bg-emerald-500"
+              : t.type === "error"
+              ? "bg-red-500"
+              : "bg-gray-700"
+          }`}
+        >
+          {t.message}
+          <button
+            onClick={() => onRemove(t.id)}
+            className="ml-3 font-bold"
+          >
+            ×
+          </button>
         </div>
       ))}
     </div>
   );
-}
+};
+
+export default ToastContainer;

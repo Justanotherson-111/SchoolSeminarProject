@@ -1,163 +1,154 @@
-using System.Security.Claims;
-using System.Text;
-using System.Threading.RateLimiting;
 using backend.DataBase;
-using backend.Models;
-using backend.Services.Interfaces;
 using backend.Services.ServiceDef;
+using backend.Services.Interfaces;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Serilog;
+using System.Text;
+using Microsoft.Extensions.Options;
+using backend.DTOs;
+using Microsoft.OpenApi.Models;
+using backend.Models;
+using backend.Controllers;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Configuration.AddEnvironmentVariables();
-var config = builder.Configuration;
 
-// 🔹 Database
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-// 🔹 Identity
-builder.Services.AddIdentity<User, IdentityRole>(options =>
+// ------------------------------
+// Configure Logging
+// ------------------------------
+builder.Host.UseSerilog((context, services, configuration) =>
 {
-    options.Password.RequiredLength = 6;
-    options.Password.RequireDigit = true;
-    options.Password.RequireNonAlphanumeric = false;
-}).AddEntityFrameworkStores<AppDbContext>()
-  .AddDefaultTokenProviders();
+    configuration
+        .WriteTo.Console()
+        .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day);
+});
 
-// 🔹 JWT
+// ------------------------------
+// Add DbContext
+// ------------------------------
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"))
+);
+
+// ------------------------------
+// Configure JWT Authentication
+// ------------------------------
+var jwtSettings = builder.Configuration.GetSection("Jwt");
+var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]);
+
 builder.Services.AddAuthentication(options =>
 {
-    options.DefaultAuthenticateScheme = "JwtBearer";
-    options.DefaultChallengeScheme = "JwtBearer";
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-.AddJwtBearer("JwtBearer", options =>
+.AddJwtBearer(options =>
 {
+    options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = config["Jwt:Issuer"],
-        ValidAudience = config["Jwt:Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(config["Jwt:Key"]!)
-        ),
-        ClockSkew = TimeSpan.Zero
+        ValidIssuer = jwtSettings["Issuer"],
+        ValidAudience = jwtSettings["Audience"],
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+
+        // map claim types (important so [Authorize(Roles="Admin")] works)
+        NameClaimType = JwtRegisteredClaimNames.Sub,
+        RoleClaimType = ClaimTypes.Role
     };
-});
-// 🔹 Rate limiting
-builder.Services.AddRateLimiter(options =>
-{
-    options.AddPolicy("AuthPolicy", ctx =>
-        RateLimitPartition.GetTokenBucketLimiter(
-            ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new TokenBucketRateLimiterOptions
-            {
-                TokenLimit = 10,
-                TokensPerPeriod = 5,
-                ReplenishmentPeriod = TimeSpan.FromMinutes(1),
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                QueueLimit = 0,
-                AutoReplenishment = true
-            }));
 
-    options.AddPolicy("UserPolicy", ctx =>
+    // optional: helpful for debugging
+    options.Events = new JwtBearerEvents
     {
-        var key = ctx.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                  ?? ctx.Connection.RemoteIpAddress?.ToString();
-        return RateLimitPartition.GetFixedWindowLimiter(key!,
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 200,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            });
-    });
-
-    options.OnRejected = (ctx, _) =>
-    {
-        ctx.HttpContext.Response.StatusCode = 429;
-        return new ValueTask();
+        OnAuthenticationFailed = ctx =>
+        {
+            var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning("JWT auth failed: {0}", ctx.Exception.Message);
+            return Task.CompletedTask;
+        }
     };
 });
 
-// 🔹 App services
-builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
-builder.Services.AddHostedService<OCRBackgroundService>();
-
+// ------------------------------
+// Configure Services
+// ------------------------------
 builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IImageService, ImageService>();
-builder.Services.AddScoped<IOcrService, TesseractOcrService>();
-builder.Services.AddScoped<IVirusScanner, ClamAvTcpScanner>();
+builder.Services.AddScoped<ITesseractOcrService, TesseractOcrService>();
+builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddHostedService<OcrBackgroundService>();
 
-builder.Services.AddControllers();
+builder.Services.Configure<UploadSettings>(builder.Configuration.GetSection("UploadSettings"));
+builder.Services.Configure<TesseractSettings>(builder.Configuration.GetSection("Tesseract"));
+
+// ------------------------------
+// Controllers + Swagger
+// ------------------------------
+builder.Services.AddControllers().AddJsonOptions(opts =>
+{
+    opts.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// ------------------------------
+// Build app
+// ------------------------------
 var app = builder.Build();
 
-// 🔹 Auto-migrate and seed admin
+// ------------------------------
+// Ensure Upload/Text folders exist
+// ------------------------------
+var uploadSettings = app.Services.GetRequiredService<IOptions<UploadSettings>>().Value;
+Directory.CreateDirectory(uploadSettings.ImageFolder);
+Directory.CreateDirectory(uploadSettings.TextFolder);
+
+// ------------------------------
+// Auto-create admin if none exists
+// ------------------------------
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    var adminExists = await db.Users.AnyAsync(u => u.Role == "Admin");
 
-    var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    if (!await roleMgr.RoleExistsAsync("Admin"))
-        await roleMgr.CreateAsync(new IdentityRole("Admin"));
-    if (!await roleMgr.RoleExistsAsync("User"))
-        await roleMgr.CreateAsync(new IdentityRole("User"));
-
-    var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-    var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? "admin@example.com";
-    var adminPass = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "ChangeMe123!";
-
-    var admin = await userMgr.FindByEmailAsync(adminEmail);
-    if (admin == null)
+    if (!adminExists)
     {
-        var newAdmin = new User { UserName = adminEmail, Email = adminEmail, FullName = "System Admin" };
-        var result = await userMgr.CreateAsync(newAdmin, adminPass);
-        if (result.Succeeded)
+        var salt = AuthController.GenerateSalt();
+        var admin = new User
         {
-            await userMgr.AddToRoleAsync(newAdmin, "Admin");
-            Console.WriteLine($"✅ Admin user created: {adminEmail}");
-        }
-        else
-        {
-            Console.WriteLine("❌ Failed to create admin user:");
-            foreach (var error in result.Errors)
-            {
-                Console.WriteLine($"   - {error.Code}: {error.Description}");
-            }
-        }
-    }
-    else
-    {
-        Console.WriteLine($"ℹ️ Admin user already exists: {adminEmail}");
+            Id = Guid.NewGuid(),
+            UserName = "admin",
+            Email = "admin@example.com",
+            Role = "Admin",
+            PasswordSalt = salt,
+            PasswordHash = AuthController.HashPassword("Admin123!", salt)
+        };
+
+        db.Users.Add(admin);
+        await db.SaveChangesAsync();
+        Log.Information("Admin user created: admin@example.com / Admin123!");
     }
 }
 
-// -------------------- Middleware setup --------------------
+
+// ------------------------------
+// Middleware
+// ------------------------------
 if (app.Environment.IsDevelopment())
 {
-    // ✅ Enable Swagger only in Development
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-// app.UseHttpsRedirection();
-
-app.UseRateLimiter();
+//app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
-// Optional: simple health endpoint for debugging
-app.MapGet("/api/health", () => Results.Ok("Healthy"));
 
 app.Run();

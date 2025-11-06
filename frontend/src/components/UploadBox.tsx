@@ -1,61 +1,47 @@
-import React, { useCallback, useState } from "react";
+import React, { useState } from "react";
 import api from "../api/axios";
 
-export default function UploadBox({ onUploaded }: { onUploaded?: () => void }) {
-  const [drag, setDrag] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
+interface Props {
+  refresh: () => void;
+  showToast: (msg: string, type?: "success" | "error") => void;
+}
 
-  const uploadFile = async (file: File) => {
-    const fd = new FormData();
-    fd.append("file", file);
+const UploadBox: React.FC<Props> = ({ refresh, showToast }) => {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setBusy(true);
     try {
-      setProgress(0);
-      await api.post("/image/upload", fd, {
+      const formData = new FormData();
+      formData.append("file", file);
+      await api.post("/image/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (e) => {
-          if (e.total) setProgress(Math.round((e.loaded / e.total) * 100));
-        },
       });
-      setProgress(null);
-      onUploaded && onUploaded();
-      alert("Uploaded! OCR will run shortly.");
+      showToast("Image uploaded!", "success");
+      setFile(null);
+      refresh();
     } catch (err) {
       console.error(err);
-      alert("Upload failed.");
-      setProgress(null);
+      showToast("Upload failed", "error");
+    } finally {
+      setBusy(false);
     }
   };
 
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDrag(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
-  }, []);
-
   return (
-    <div>
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={onDrop}
-        className={`border-2 border-dashed rounded-2xl p-8 text-center ${drag ? "border-emerald-500 bg-white/2" : "border-gray-700 bg-black/20"}`}
+    <div className="bg-gray-800 p-4 rounded-md mb-4 flex flex-col sm:flex-row gap-2 items-center">
+      <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="text-gray-100" />
+      <button
+        onClick={handleUpload}
+        disabled={busy || !file}
+        className="bg-emerald-500 hover:bg-emerald-400 px-4 py-2 rounded-md text-black font-medium"
       >
-        <div className="text-gray-300">Drag & drop an image here, or</div>
-        <label className="mt-3 inline-flex items-center cursor-pointer bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded text-black">
-          <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadFile(f); }} />
-          Choose a file
-        </label>
-      </div>
-
-      {progress !== null && (
-        <div className="mt-3">
-          <div className="w-full bg-gray-800 rounded">
-            <div style={{ width: `${progress}%` }} className="bg-emerald-500 text-black p-1 text-sm rounded">
-              {progress}%
-            </div>
-          </div>
-        </div>
-      )}
+        {busy ? "Uploading..." : "Upload"}
+      </button>
     </div>
   );
-}
+};
+
+export default UploadBox;

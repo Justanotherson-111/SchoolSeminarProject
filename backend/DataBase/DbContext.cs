@@ -1,45 +1,91 @@
-using backend.Models;
-using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using backend.Models;
 
 namespace backend.DataBase
 {
-    public class AppDbContext : IdentityDbContext<User>
+    public class AppDbContext : DbContext
     {
-        // Constructor for runtime DI
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-        // Optional: parameterless constructor for design-time tools (not required if using IDesignTimeDbContextFactory)
-        // public AppDbContext() { }
+        public DbSet<User> Users => Set<User>();
+        public DbSet<Image> Images => Set<Image>();
+        public DbSet<TextFile> TextFiles => Set<TextFile>();
+        public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+        public DbSet<OcrJob> OcrJobs => Set<OcrJob>();
 
-        public DbSet<ImageRecord> ImageRecords { get; set; }
-        public DbSet<ExtractedText> ExtractedTexts { get; set; }
-        public DbSet<RefreshToken> RefreshTokens { get; set; }
-
-        protected override void OnModelCreating(ModelBuilder builder)
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            base.OnModelCreating(builder);
+            base.OnModelCreating(modelBuilder);
 
-            // Configure User -> Images relationship
-            builder.Entity<User>()
+            // User ↔ Images
+            modelBuilder.Entity<User>()
                 .HasMany(u => u.Images)
-                .WithOne(i => i.Owner)
-                .HasForeignKey(i => i.OwnerId)
+                .WithOne(i => i.User)
+                .HasForeignKey(i => i.UserId)
+                .IsRequired()
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Configure ImageRecord -> ExtractedTexts relationship
-            builder.Entity<ImageRecord>()
-                .HasMany(i => i.ExtractedTexts)
-                .WithOne(t => t.ImageRecord)
-                .HasForeignKey(t => t.ImageRecordId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // Configure User -> RefreshTokens relationship
-            builder.Entity<RefreshToken>()
-                .HasOne(r => r.User)
-                .WithMany(u => u.RefreshTokens)
+            // User ↔ RefreshTokens
+            modelBuilder.Entity<User>()
+                .HasMany(u => u.RefreshTokens)
+                .WithOne(r => r.User)
                 .HasForeignKey(r => r.UserId)
-                .OnDelete(DeleteBehavior.Cascade); 
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Image ↔ TextFiles
+            modelBuilder.Entity<Image>()
+                .HasMany(i => i.TextFiles)
+                .WithOne(t => t.Image)
+                .HasForeignKey(t => t.ImageId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Enforce string lengths and required
+            modelBuilder.Entity<User>()
+                .Property(u => u.UserName)
+                .HasMaxLength(50)
+                .IsRequired();
+
+            modelBuilder.Entity<User>()
+                .Property(u => u.Email)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            modelBuilder.Entity<User>()
+                .Property(u => u.Role)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            modelBuilder.Entity<RefreshToken>()
+                .Property(r => r.Token)
+                .IsRequired();
+
+            modelBuilder.Entity<Image>()
+                .Property(i => i.FileName)
+                .IsRequired();
+
+            modelBuilder.Entity<Image>()
+                .Property(i => i.OriginalFileName)
+                .IsRequired();
+
+            modelBuilder.Entity<Image>()
+                .Property(i => i.RelativePath)
+                .IsRequired();
+
+            modelBuilder.Entity<TextFile>()
+                .Property(t => t.TxtFilePath)
+                .IsRequired();
+
+            modelBuilder.Entity<TextFile>()
+                .Property(t => t.Language)
+                .HasMaxLength(10)
+                .IsRequired();
+
+            // Unique constraint on Email
+            modelBuilder.Entity<User>()
+                .HasIndex(u => u.Email)
+                .IsUnique();
         }
     }
 }

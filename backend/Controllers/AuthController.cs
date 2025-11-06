@@ -1,13 +1,11 @@
-using System.Security.Cryptography;
 using backend.DataBase;
 using backend.DTOs;
 using backend.Models;
 using backend.Services.Interfaces;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Org.BouncyCastle.Tls;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace backend.Controllers
 {
@@ -15,159 +13,125 @@ namespace backend.Controllers
     [Route("api/[controller]")]
     public class AuthController : ControllerBase
     {
-        private readonly UserManager<User> _userManager;
-        private readonly IJwtService _jwtService;
-        private readonly RoleManager<IdentityRole> _roleManager;
-        private readonly AppDbContext _dbContext;
-        private readonly IWebHostEnvironment builder;
-        public AuthController(UserManager<User> userManager, IJwtService jwtService
-        , RoleManager<IdentityRole> roleManager, AppDbContext dbContext,
-        IWebHostEnvironment env)
+        private readonly AppDbContext _db;
+        private readonly IJwtService _jwt;
+
+        public AuthController(AppDbContext db, IJwtService jwt)
         {
-            _userManager = userManager;
-            _jwtService = jwtService;
-            _roleManager = roleManager;
-            _dbContext = dbContext;
-            builder = env;
+            _db = db;
+            _jwt = jwt;
         }
+
+        // -------------------------------
+        // Registration
+        // -------------------------------
         [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] RegisterDTO dto)
+        public async Task<IActionResult> Register(RegisterDTO dto)
         {
-            if (await _userManager.FindByNameAsync(dto.UserName) != null)
-            {
-                return BadRequest("Username already exists.");
-            }
-            var user = new User { UserName = dto.UserName, Email = dto.Email, FullName = dto.FullName };
-            var res = await _userManager.CreateAsync(user, dto.Password);
-            if (!res.Succeeded) return BadRequest(res.Errors);
+            if (await _db.Users.AnyAsync(u => u.Email == dto.Email))
+                return BadRequest(new { message = "Email already exists" });
 
-            if (!await _roleManager.RoleExistsAsync("Admin"))
+            var salt = GenerateSalt();
+            var user = new User
             {
-                await _roleManager.CreateAsync(new IdentityRole("Admin"));
-            }
-            if (!await _roleManager.RoleExistsAsync("User"))
+                UserName = dto.UserName,
+                Email = dto.Email,
+                Role = "User",
+                PasswordSalt = salt,
+                PasswordHash = HashPassword(dto.Password, salt)
+            };
+
+            _db.Users.Add(user);
+            await _db.SaveChangesAsync();
+
+            var accessToken = _jwt.GenerateAccessToken(user);
+            var refreshToken = _jwt.GenerateRefreshToken(user);
+
+            _db.RefreshTokens.Add(refreshToken);
+            await _db.SaveChangesAsync();
+
+            return Ok(new
             {
-                await _roleManager.CreateAsync(new IdentityRole("User"));
-            }
-            return Ok(new { message = "Registered" });
+                accessToken = accessToken,
+                refreshToken = refreshToken.Token
+            });
         }
-        [EnableRateLimiting("AuthPolicy")]
+
+        // -------------------------------
+        // Login
+        // -------------------------------
         [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] LoginDTO dto)
+        public async Task<IActionResult> Login(LoginDTO dto)
         {
-            // Debug: check input data (mask password for safety)
-            Console.WriteLine($"[DEBUG] Login attempt - Username: {dto.UserName}, Password length: {dto.Password?.Length ?? 0}");
+            var user = await _db.Users
+                .Include(u => u.RefreshTokens)
+                .FirstOrDefaultAsync(u => u.Email == dto.Email);
 
-            var user = await _userManager.FindByNameAsync(dto.UserName);
-            if (user == null)
+            if (user == null || HashPassword(dto.Password, user.PasswordSalt) != user.PasswordHash)
+                return Unauthorized(new { message = "Invalid credentials" });
+
+            // Revoke old tokens
+            foreach (var t in user.RefreshTokens.Where(t => !t.Revoked && t.Expires > DateTime.UtcNow))
+                t.Revoked = true;
+
+            var accessToken = _jwt.GenerateAccessToken(user);
+            var refreshToken = _jwt.GenerateRefreshToken(user);
+
+            _db.RefreshTokens.Add(refreshToken);
+            await _db.SaveChangesAsync();
+
+            return Ok(new
             {
-                Console.WriteLine($"[DEBUG] User not found: {dto.UserName}");
-                return Unauthorized("Invalid username");
-            }
-
-            var passwordValid = await _userManager.CheckPasswordAsync(user, dto.Password);
-            if (!passwordValid)
-            {
-                Console.WriteLine($"[DEBUG] Invalid password for user: {dto.UserName}");
-                return Unauthorized("Invalid password");
-            }
-
-            var roles = await _userManager.GetRolesAsync(user);
-
-            var accessToken = _jwtService.GenerateToken(user, roles);
-            var refreshToken = GenerateRToken();
-
-            var refreshEntity = new RefreshToken
-            {
-                Token = refreshToken,
-                UserId = user.Id,
-                Created = DateTime.UtcNow,
-                Expires = DateTime.UtcNow.AddDays(7),
-            };
-
-            _dbContext.RefreshTokens.Add(refreshEntity);
-            await _dbContext.SaveChangesAsync();
-
-            Response.Cookies.Append("refreshToken", refreshEntity.Token, new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = builder.IsProduction(),
-                SameSite = SameSiteMode.None,
-                Expires = refreshEntity.Expires
+                accessToken = accessToken,
+                refreshToken = refreshToken.Token
             });
-
-            Console.WriteLine($"[DEBUG] Login successful - User: {user.UserName}, Roles: {string.Join(", ", roles)}");
-
-            return Ok(new { accessToken });
         }
 
+        // -------------------------------
+        // Refresh token
+        // -------------------------------
         [HttpPost("refresh")]
-        public async Task<IActionResult> Refresh()
+        public async Task<IActionResult> Refresh(RefreshDTO dto)
         {
-            var oldRefreshToken = Request.Cookies["refreshToken"];
-            if (oldRefreshToken == null) return Unauthorized(new { error = "No refresh token provided" });
+            var token = await _db.RefreshTokens
+                .Include(r => r.User)
+                .FirstOrDefaultAsync(r => r.Token == dto.RefreshToken);
 
-            var oldStoredToken = await _dbContext.RefreshTokens.Include(r => r.User)
-                .FirstOrDefaultAsync(r => r.Token == oldRefreshToken);
+            if (token == null || token.Revoked || token.Expires < DateTime.UtcNow)
+                return Unauthorized(new { message = "Invalid or expired refresh token" });
 
-            if (oldStoredToken == null || oldStoredToken.IsExpired || oldStoredToken.Revoked != null)
-                return Unauthorized(new { error = "Invalid or expired refresh token" });
-            oldStoredToken.Revoked = DateTime.UtcNow;
+            // Revoke used token
+            token.Revoked = true;
 
-            var newToken = new RefreshToken
+            var newAccess = _jwt.GenerateAccessToken(token.User!);
+            var newRefresh = _jwt.GenerateRefreshToken(token.User!);
+
+            _db.RefreshTokens.Add(newRefresh);
+            await _db.SaveChangesAsync();
+
+            return Ok(new
             {
-                Token = GenerateRToken(),
-                UserId = oldStoredToken.UserId,
-                Expires = DateTime.UtcNow.AddDays(7),
-            };
-            oldStoredToken.ReplacedByToken = newToken.Token;
-            _dbContext.RefreshTokens.Add(newToken);
-            await _dbContext.SaveChangesAsync();
-
-            var newAccessToken = _jwtService.GenerateToken(oldStoredToken.User, await _userManager.GetRolesAsync(oldStoredToken.User));
-            Response.Cookies.Append("refreshToken", newToken.Token, new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = true,
-                SameSite = SameSiteMode.None,
-                Expires = newToken.Expires
+                accessToken = newAccess,
+                refreshToken = newRefresh.Token
             });
-            return Ok(new { token = newAccessToken });
         }
 
-        private string GenerateRToken()
+        // -------------------------------
+        // Utilities: Password Hashing
+        // -------------------------------
+        public static string GenerateSalt()
         {
-            var randomBytes = new Byte[64];
-            using var randNum = RandomNumberGenerator.Create();
-            randNum.GetBytes(randomBytes);
-            return Convert.ToBase64String(randomBytes);
+            var bytes = new byte[16];
+            using var rng = RandomNumberGenerator.Create();
+            rng.GetBytes(bytes);
+            return Convert.ToBase64String(bytes);
         }
-        [HttpPost("logout")]
-        public async Task<IActionResult> Logout()
+
+        public static string HashPassword(string password, string salt)
         {
-            try
-            {
-                var refreshToken = Request.Cookies["refreshToken"];
-                if (!string.IsNullOrEmpty(refreshToken))
-                {
-                    // Find token in database and revoke it
-                    var storedToken = await _dbContext.RefreshTokens
-                        .FirstOrDefaultAsync(r => r.Token == refreshToken);
-
-                    if (storedToken != null)
-                    {
-                        storedToken.Revoked = DateTime.UtcNow;
-                        await _dbContext.SaveChangesAsync();
-                    }
-                }
-
-                Response.Cookies.Delete("refreshToken");
-                return Ok(new { message = "Logged out" });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, "An error occurred during logout.");
-            }
+            using var sha = SHA256.Create();
+            var combined = Encoding.UTF8.GetBytes(password + salt);
+            return Convert.ToBase64String(sha.ComputeHash(combined));
         }
     }
 }

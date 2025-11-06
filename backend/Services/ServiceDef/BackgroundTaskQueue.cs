@@ -1,36 +1,25 @@
-using System.Threading.Channels;
 using backend.Models;
 using backend.Services.Interfaces;
-using Microsoft.VisualBasic;
+using System.Collections.Concurrent;
 
 namespace backend.Services.ServiceDef
 {
     public class BackgroundTaskQueue : IBackgroundTaskQueue
     {
-        private readonly Channel<OcrJob> _queue;
-        public BackgroundTaskQueue(int capacity = 100)
+        private readonly ConcurrentQueue<OcrJob> _jobs = new();
+        private readonly SemaphoreSlim _signal = new(0);
+
+        public void EnqueueOcrJob(OcrJob job)
         {
-            var options = new BoundedChannelOptions(capacity)
-            {
-                SingleReader = true,
-                SingleWriter = false,
-                FullMode = BoundedChannelFullMode.Wait
-            };
-            _queue = Channel.CreateBounded<OcrJob>(options);
-        }
-        public async ValueTask<OcrJob> DequeueAsync(CancellationToken cancellationToken)
-        {
-            var job = await _queue.Reader.ReadAsync(cancellationToken);
-            return job;
+            _jobs.Enqueue(job);
+            _signal.Release();
         }
 
-        public async ValueTask QueueBackgroundWorkItemAsync(OcrJob job)
+        public async Task<OcrJob?> DequeueAsync(CancellationToken cancellationToken)
         {
-            if (job == null)
-            {
-                throw new ArgumentNullException(nameof(job));
-            }
-            await _queue.Writer.WriteAsync(job);
+            await _signal.WaitAsync(cancellationToken);
+            _jobs.TryDequeue(out var job);
+            return job;
         }
     }
 }

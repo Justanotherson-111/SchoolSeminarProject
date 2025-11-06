@@ -1,19 +1,14 @@
 import { useEffect, useState } from "react";
 
-/**
- * Detects if the user is on mobile or desktop based on window width.
- * Automatically updates on window resize.
- */
-export function useDeviceType() {
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+export const useDeviceType = () => {
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    handler();
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
   }, []);
 
   return { isMobile };
-}
+};

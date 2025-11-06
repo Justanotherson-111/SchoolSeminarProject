@@ -14,14 +14,25 @@ services:
       retries: 5
     networks:
       - app_net
-
+  backend-sdk:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.sdk
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - postgres
+    networks:
+      - app_net
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    env_file: ./backend/.env
+    #env_file: ./backend/.env
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      # explicitly pass JWT and DB variables
     depends_on:
       postgres:
         condition: service_healthy

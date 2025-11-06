@@ -1,78 +1,84 @@
 using backend.DataBase;
+using backend.DTOs;
 using backend.Models;
 using backend.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
-public class OCRBackgroundService : BackgroundService
+namespace backend.Services.ServiceDef
 {
-    private readonly IBackgroundTaskQueue _queue;
-    private readonly ILogger<OCRBackgroundService> _logger;
-    private readonly IServiceScopeFactory _scopeFactory;
-
-    public OCRBackgroundService(IBackgroundTaskQueue queue, ILogger<OCRBackgroundService> logger, IServiceScopeFactory scopeFactory)
+    public class OcrBackgroundService : BackgroundService
     {
-        _queue = queue;
-        _logger = logger;
-        _scopeFactory = scopeFactory;
-    }
+        private readonly IBackgroundTaskQueue _queue;
+        private readonly ITesseractOcrService _ocrService;
+        private readonly IServiceProvider _serviceProvider;
+        private readonly IWebHostEnvironment _env;
+        private readonly UploadSettings _uploadSettings;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("OCR background service starting.");
-
-        while (!stoppingToken.IsCancellationRequested)
+        public OcrBackgroundService(
+            IBackgroundTaskQueue queue,
+            ITesseractOcrService ocrService,
+            IServiceProvider serviceProvider,
+            IWebHostEnvironment env,
+            IOptions<UploadSettings> uploadSettings)
         {
-            OcrJob job = null;
-            try
-            {
-                job = await _queue.DequeueAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) { break; }
-
-            if (job == null) continue;
-
-            try
-            {
-                using var scope = _scopeFactory.CreateScope();
-                var ocr = scope.ServiceProvider.GetRequiredService<IOcrService>();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var logger = scope.ServiceProvider.GetRequiredService<ILogger<OCRBackgroundService>>();
-
-                logger.LogInformation("Processing OCR for ImageId {ImageId}", job.ImageRecordId);
-
-                var text = await ocr.ExtractTextAsync(job.FullPath, job.Language);
-                if (!string.IsNullOrEmpty(text))
-                {
-                    var txtFolder = Path.Combine(Directory.GetCurrentDirectory(), "ExtractedTexts");
-                    if (!Directory.Exists(txtFolder)) Directory.CreateDirectory(txtFolder);
-
-                    var txtFileName = $"{Guid.NewGuid()}.txt";
-                    var txtPath = Path.Combine(txtFolder, txtFileName);
-
-                    await File.WriteAllTextAsync(txtPath, text);
-
-                    var extracted = new ExtractedText
-                    {
-                        ImageRecordId = job.ImageRecordId,
-                        Language = job.Language,
-                        TxtFilePath = txtPath
-                    };
-                    db.ExtractedTexts.Add(extracted);
-                    await db.SaveChangesAsync();
-
-                    logger.LogInformation("OCR completed and saved to {TxtPath}", txtPath);
-                }
-                else
-                {
-                    logger.LogWarning("OCR returned empty text for {ImageId}", job.ImageRecordId);
-                }
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Error processing OCR job {@Job}", job);
-            }
+            _queue = queue;
+            _ocrService = ocrService;
+            _serviceProvider = serviceProvider;
+            _env = env;
+            _uploadSettings = uploadSettings.Value;
         }
 
-        _logger.LogInformation("OCR background service stopping.");
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                var job = await _queue.DequeueAsync(stoppingToken);
+                if (job == null) continue;
+
+                try
+                {
+                    using var scope = _serviceProvider.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    
+                    var image = await db.Images
+                        .Include(i => i.User)
+                        .FirstOrDefaultAsync(i => i.Id == job.ImageId, stoppingToken);
+
+                    if (image == null) continue;
+
+                    var fullImagePath = Path.Combine(_env.ContentRootPath, _uploadSettings.ImageFolder, image.RelativePath);
+
+                    // Extract text from image
+                    var text = await _ocrService.ExtractTextAsync(fullImagePath);
+
+                    // Save text to ExtractedText/<username> folder
+                    var userTextDir = Path.Combine(_env.ContentRootPath, _uploadSettings.TextFolder, image.User!.UserName);
+                    Directory.CreateDirectory(userTextDir);
+
+                    var txtFileName = $"{Guid.NewGuid()}.txt";
+                    var txtFilePath = Path.Combine(userTextDir, txtFileName);
+                    await File.WriteAllTextAsync(txtFilePath, text, stoppingToken);
+
+                    // Save record to DB
+                    var txtRecord = new TextFile
+                    {
+                        ImageId = image.Id,
+                        TxtFilePath = Path.Combine(image.User.UserName, txtFileName), // store relative
+                        Language = "eng"
+                    };
+
+                    db.TextFiles.Add(txtRecord);
+                    job.Processed = true;
+                    db.OcrJobs.Update(job);
+                    await db.SaveChangesAsync(stoppingToken);
+                }
+                catch (Exception ex)
+                {
+                    // Optional: log the exception
+                    Console.WriteLine($"OCR job failed: {ex.Message}");
+                }
+            }
+        }
     }
 }

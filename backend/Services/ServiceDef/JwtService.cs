@@ -1,52 +1,84 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using backend.Models;
 using backend.Services.Interfaces;
 using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace backend.Services.ServiceDef
 {
     public class JwtService : IJwtService
     {
         private readonly IConfiguration _config;
+
         public JwtService(IConfiguration config)
         {
             _config = config;
         }
-        public string GenerateToken(User user, IList<string> roles)
+
+        public string GenerateAccessToken(User user)
         {
-            var jwtKey = _config["Jwt:Key"]
-             ?? throw new Exception("JWT Key is missing from configuration");
-            var jwtIssuer = _config["Jwt:Issuer"]
-                            ?? throw new Exception("JWT Issuer is missing from configuration");
-            var jwtAudience = _config["Jwt:Audience"]
-                              ?? throw new Exception("JWT Audience is missing from configuration");
-            var expireMinutes = int.TryParse(_config["Jwt:ExpireMinutes"], out var minutes) ? minutes : 60;
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-            var claims = new List<Claim>{
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id),
-                new Claim(JwtRegisteredClaimNames.UniqueName,user.UserName),
-                new Claim("fullname",user.FullName ?? "")
-            };
-            foreach (var role in roles)
+            var claims = new[]
             {
-                claims.Add(new Claim(ClaimTypes.Role, role));
-            }
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),
+                new Claim(ClaimTypes.Role, user.Role)  // updated to use ClaimTypes.Role
+            };
 
             var token = new JwtSecurityToken(
-                issuer: jwtIssuer,
-                audience: jwtAudience,
+                issuer: _config["Jwt:Issuer"],
+                audience: _config["Jwt:Audience"],
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(expireMinutes),
-                signingCredentials: credentials
+                expires: DateTime.UtcNow.AddMinutes(15),  // configurable if needed
+                signingCredentials: creds
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        public RefreshToken GenerateRefreshToken(User user)
+        {
+            return new RefreshToken
+            {
+                UserId = user.Id,
+                Token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64)),
+                Expires = DateTime.UtcNow.AddDays(7),
+                Revoked = false
+            };
+        }
+
+        public bool ValidateToken(string token, out string? userId)
+        {
+            userId = null;
+            try
+            {
+                var tokenHandler = new JwtSecurityTokenHandler();
+                var key = Encoding.UTF8.GetBytes(_config["Jwt:Key"]!);
+
+                tokenHandler.ValidateToken(token, new TokenValidationParameters
+                {
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = new SymmetricSecurityKey(key),
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidIssuer = _config["Jwt:Issuer"],
+                    ValidAudience = _config["Jwt:Audience"],
+                    ClockSkew = TimeSpan.Zero  // remove default 5-min skew
+                }, out SecurityToken validatedToken);
+
+                var jwtToken = (JwtSecurityToken)validatedToken;
+                userId = jwtToken.Claims.First(x => x.Type == JwtRegisteredClaimNames.Sub).Value;
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 }

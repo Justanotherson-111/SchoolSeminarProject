@@ -5,24 +5,25 @@
 namespace backend.Migrations
 {
     /// <inheritdoc />
-    public partial class AddRevokedToRefreshToken : Migration
+    public partial class AddPasswordSaltToUser : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
-                name: "ReplacedByToken",
-                table: "RefreshTokens",
+                name: "PasswordSalt",
+                table: "Users",
                 type: "text",
-                nullable: true);
+                nullable: false,
+                defaultValue: "");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "ReplacedByToken",
-                table: "RefreshTokens");
+                name: "PasswordSalt",
+                table: "Users");
         }
     }
 }

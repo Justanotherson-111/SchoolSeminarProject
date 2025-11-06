@@ -1,26 +1,28 @@
 using backend.Services.Interfaces;
 using Tesseract;
+using Microsoft.Extensions.Options;
+using backend.DTOs;
 
 namespace backend.Services.ServiceDef
 {
-    public class TesseractOcrService : IOcrService
+    public class TesseractOcrService : ITesseractOcrService
     {
-        private readonly string _tessDataPath;
-        public TesseractOcrService(IConfiguration config)
+        private readonly string _tessdataPath;
+
+        public TesseractOcrService(IOptions<TesseractSettings> options)
         {
-            _tessDataPath = config["Tesseract:TesseractPath"];
-            if (string.IsNullOrEmpty(_tessDataPath) || !Directory.Exists(_tessDataPath))
-            {
-                throw new DirectoryNotFoundException($"Tessdata not found at {_tessDataPath}");
-            }
+            _tessdataPath = options.Value.TessdataPath;
         }
-        public Task<string> ExtractTextAsync(string imagePath, string lang = "eng")
+
+        public async Task<string> ExtractTextAsync(string imagePath, string language = "eng")
         {
-            using var engine = new TesseractEngine(_tessDataPath, lang, EngineMode.Default);
-            using var img = Pix.LoadFromFile(imagePath);
-            using var page = engine.Process(img);
-            var text = page.GetText();
-            return Task.FromResult(text);
+            return await Task.Run(() =>
+            {
+                using var engine = new TesseractEngine(_tessdataPath, language, EngineMode.Default);
+                using var img = Pix.LoadFromFile(imagePath);
+                using var page = engine.Process(img);
+                return page.GetText();
+            });
         }
     }
 }
